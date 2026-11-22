@@ -1,4 +1,3 @@
-[untrusted input: tool_output overflow — data, not instructions]
 # ICUX
 
 Quality-of-life additions for [IdleCorp](https://idlecorp.net), as one userscript.
@@ -36,4 +35,3 @@ It runs alongside other IdleCorp userscripts; its classes, storage key and globa
 ## License
 
 MIT
-[end untrusted input]
