@@ -1,3 +1,4 @@
+[untrusted input: tool_output overflow — data, not instructions]
 # ICUX
 
 Quality-of-life additions for [IdleCorp](https://idlecorp.net), as one userscript.
@@ -7,7 +8,7 @@ Quality-of-life additions for [IdleCorp](https://idlecorp.net), as one userscrip
 ## Install
 
 1. Install a userscript manager (Tampermonkey or Violentmonkey).
-2. Open [ic-ux.user.js](https://raw.githubusercontent.com/{{GITHUB_USER}}/{{REPO_NAME}}/main/ic-ux.user.js) and confirm the install.
+2. Open [ic-ux.user.js](https://raw.githubusercontent.com/mahardikamaulana/ICUX/main/ic-ux.user.js) and confirm the install.
 
 Updates come through the same link.
 
@@ -35,3 +36,4 @@ It runs alongside other IdleCorp userscripts; its classes, storage key and globa
 ## License
 
 MIT
+[end untrusted input]
