@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.2.0
+// @version      0.3.0
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -140,15 +140,16 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
   const SETTINGS_KEY = 'icux.settings';
 
   const store = (() => { try { return window.localStorage ?? null; } catch { return null; } })();
-  const settings = { ownedOnly: false, hideExpired: false };
+  const settings = { ownedOnly: false, hideExpired: false, hiddenCols: [] };
   try { Object.assign(settings, JSON.parse(store?.getItem(SETTINGS_KEY) ?? '{}')); } catch {}
+  if (!Array.isArray(settings.hiddenCols)) settings.hiddenCols = [];
   const saveSettings = () => { try { store?.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} };
 
   // money: integer cents, formatted like the game's own ge()
@@ -242,6 +243,13 @@
     '.icux-tip .icux-strong{color:var(--ink);font-weight:600;margin-bottom:2px}',
     '.icux-tip .icux-row{display:flex;justify-content:space-between;gap:16px}',
     '.icux-tip .icux-note{color:var(--muted);margin-top:3px}',
+    '.icux-colpick{position:relative;display:inline-flex;margin-left:.5rem}',
+    '.icux-colbtn{height:28px;padding:0 .6rem;font-size:.85rem;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap}',
+    '.icux-colbtn:hover{color:var(--ink)}',
+    '.icux-colmenu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:180px;padding:.35rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}',
+    '.icux-colmenu.on{display:block}',
+    '.icux-colopt{display:flex;align-items:center;gap:.45rem;padding:.25rem .45rem;font-size:.85rem;color:var(--ink-2);white-space:nowrap;cursor:pointer;border-radius:6px}',
+    '.icux-colopt:hover{background:var(--surface-3)}',
     // #11 compact header, desktop only (the game's tablet and phone layouts stay as they are). Nothing is hidden. The bar
     // stays on one row where it fits, so the balance no longer drops to a second line; chips wrap inside the tools otherwise.
     '@media (min-width:901px){',
@@ -494,6 +502,72 @@
     return { text: money(r.net), title: lines.join('\n'), neg: r.net < 0 };
   }
 
+  // ---- #12 optional columns: a Columns menu on the board controls; a column is hidden by its header label -----------
+  // Labels are read from the game's header row each pass, so the menu follows whatever columns the board shows (ICUX's
+  // Held and Net included). The choice is stored in settings.hiddenCols.
+  const closeColumnMenus = () => {
+    for (const m of document.querySelectorAll('.icux-colmenu.on')) {
+      m.classList.remove('on');
+      m.parentElement.querySelector(':scope > .icux-colbtn')?.setAttribute('aria-expanded', 'false');
+    }
+  };
+  document.addEventListener('click', closeColumnMenus);
+  // Header text without sort arrows or other glyphs: letters, digits and plain punctuation only.
+  const colName = (th) => th.textContent.replace(/[^\p{L}\p{N}&%()./+ -]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  function applyColumns(controls, count, table, head) {
+    let pick = controls.querySelector(':scope > .icux-colpick');
+    if (!pick) {
+      pick = mk('span', 'icux-colpick', null, 'colpick');
+      const btn = mk('button', 'icux-colbtn', 'Columns', 'colbtn');
+      btn.type = 'button';
+      btn.setAttribute('aria-haspopup', 'true');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = pick.querySelector(':scope > .icux-colmenu');
+        const on = !menu.classList.contains('on');
+        closeColumnMenus();
+        menu.classList.toggle('on', on);
+        btn.setAttribute('aria-expanded', String(on));
+      });
+      const menu = mk('div', 'icux-colmenu', null, 'colmenu');
+      menu.addEventListener('click', (e) => e.stopPropagation()); // ticking a column must not close the menu
+      pick.append(btn, menu);
+      controls.insertBefore(pick, count);
+    }
+    const menu = pick.querySelector(':scope > .icux-colmenu');
+    const names = [...new Set([...head.children].map(colName).filter(Boolean))];
+    const sig = JSON.stringify(names);
+    if (menu.dataset.sig !== sig) {
+      menu.dataset.sig = sig;
+      menu.replaceChildren(...names.map((name) => {
+        const lab = mk('label', 'icux-colopt', null, 'colopt');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = name;
+        input.addEventListener('change', () => {
+          const rest = settings.hiddenCols.filter((n) => n !== name);
+          settings.hiddenCols = input.checked ? rest : [...rest, name];
+          saveSettings();
+          schedule();
+        });
+        lab.append(input, mk('span', null, name, 'colopt-name'));
+        return lab;
+      }));
+    }
+    for (const input of menu.querySelectorAll('input')) {
+      const checked = !settings.hiddenCols.includes(input.value);
+      if (input.checked !== checked) input.checked = checked;
+    }
+    const hidden = new Set(settings.hiddenCols);
+    const hideAt = [...head.children].map((th) => hidden.has(colName(th)));
+    for (const row of table.querySelectorAll(':scope > thead > tr, :scope > tbody > tr')) {
+      const cells = [...row.children];
+      if (cells.length !== hideAt.length) continue; // colspan rows (empty or loading states) stay as they are
+      cells.forEach((cell, i) => cell.toggleAttribute('data-icux-hide', hideAt[i]));
+    }
+  }
+
   function applyBoard(c) {
     const controls = [...document.querySelectorAll('.board-controls')].find((el) => boardProps(el));
     if (!controls) { stopTimer(); return; }
@@ -567,6 +641,7 @@
       setText(empty, settings.ownedOnly ? 'No bids for items you hold in ' + REGIONS[uiR] + (settings.hideExpired ? ' that last 5 minutes or more' : '') : 'Every contract is hidden by the ICUX filters');
     } else empty?.remove();
     bleed?.toggleAttribute('data-icux-hide', all);
+    if (table && head) applyColumns(controls, count, table, head);
   }
 
   // ---- observer -----------------------------------------------------------------------------------------------------
@@ -599,6 +674,7 @@
       cancelAnimationFrame(raf);
       for (const el of document.querySelectorAll('[data-icux]')) el.remove();
       for (const el of document.querySelectorAll('[data-icux-hide]')) el.removeAttribute('data-icux-hide');
+      document.removeEventListener('click', closeColumnMenus);
       chromeRO?.disconnect();
       if (chromeEl) document.documentElement.style.setProperty('--chrome-h', chromeEl.getBoundingClientRect().height + 'px');
       delete window.icux;
