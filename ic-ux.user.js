@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.4.1
+// @version      0.4.2
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -140,7 +140,7 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
@@ -451,6 +451,35 @@
     }
   }
 
+  // ---- #10 post an order: selling lists only items in stock -----------------------------------------------------------
+  function applyPostOrder(c) {
+    const input = document.getElementById('order-item');
+    if (!input) return;
+    const selling = input.closest('.modal-backdrop')?.querySelector('.seg')?.firstElementChild?.getAttribute('aria-pressed') === 'true'; // the game's side order is Sell, Buy
+    const r = propsUp(input, 'region') ?? uiRegion();
+    const inStock = (item) => icuxMath.held(c.st, r, item) > 0;
+    // the picker's props (value, options, onChange) belong to the game's own component: calling onChange is the same as picking a row
+    const picker = fiberUp(input, (p) => Array.isArray(p.options) && typeof p.onChange === 'function');
+    if (selling && picker && !inStock(picker.value)) {
+      const pick = picker.options.find((o) => inStock(o.value));
+      if (pick) picker.onChange(pick.value);
+    }
+    const list = document.getElementById(input.getAttribute('aria-controls'));
+    if (!list) return;
+    const rows = [...list.querySelectorAll('.option-pick-row')];
+    for (const row of rows) {
+      const item = Number(fiberKey(row));
+      row.toggleAttribute('data-icux-hide', selling && !inStock(item));
+    }
+    // every rendered row hidden: the popover would be blank, so say why (nothing held, or only unstocked matches)
+    const none = selling && rows.length > 0 && rows.every((row) => row.hasAttribute('data-icux-hide'));
+    const note = list.querySelector(':scope > .icux-empty');
+    if (none) {
+      const text = !picker || !picker.options.some((o) => inStock(o.value)) ? 'You hold nothing to sell' : 'No stocked matches';
+      if (note) setText(note, text); else list.prepend(mk('div', 'option-pick-empty icux-empty', text, 'empty'));
+    } else note?.remove();
+  }
+
   // ---- #5 owned filter, #6 held column, #8 net, #9 hide expiring + m:ss -----------------------------------------------
   let timer = 0;
   const tickSpans = () => {
@@ -670,7 +699,7 @@
   }
 
   // ---- observer -----------------------------------------------------------------------------------------------------
-  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyBoard, applyTables];
+  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyPostOrder, applyBoard, applyTables];
   function pass() {
     watchChrome();
     ctx = walk();
@@ -689,7 +718,7 @@
   const style = mk('style', null, CSS, 'css');
   style.id = 'icux-css';
   document.head.append(style);
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-pressed'] });
 
   window.icux = {
     version: VERSION, math: icuxMath, settings, refresh: schedule,
