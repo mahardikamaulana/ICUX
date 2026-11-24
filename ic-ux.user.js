@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.3.0
+// @version      0.4.0
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -140,16 +140,16 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
   const SETTINGS_KEY = 'icux.settings';
 
   const store = (() => { try { return window.localStorage ?? null; } catch { return null; } })();
-  const settings = { ownedOnly: false, hideExpired: false, hiddenCols: [] };
+  const settings = { ownedOnly: false, hideExpired: false, hiddenColumns: {} };
   try { Object.assign(settings, JSON.parse(store?.getItem(SETTINGS_KEY) ?? '{}')); } catch {}
-  if (!Array.isArray(settings.hiddenCols)) settings.hiddenCols = [];
+  if (!settings.hiddenColumns || typeof settings.hiddenColumns !== 'object' || Array.isArray(settings.hiddenColumns)) settings.hiddenColumns = {};
   const saveSettings = () => { try { store?.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} };
 
   // money: integer cents, formatted like the game's own ge()
@@ -243,7 +243,7 @@
     '.icux-tip .icux-strong{color:var(--ink);font-weight:600;margin-bottom:2px}',
     '.icux-tip .icux-row{display:flex;justify-content:space-between;gap:16px}',
     '.icux-tip .icux-note{color:var(--muted);margin-top:3px}',
-    '.icux-colpick{position:relative;display:inline-flex;margin-left:.5rem}',
+    '.icux-colpick{position:relative;display:flex;justify-content:flex-end;width:100%;margin-bottom:4px}',
     '.icux-colbtn{height:28px;padding:0 .6rem;font-size:.85rem;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap}',
     '.icux-colbtn:hover{color:var(--ink)}',
     '.icux-colmenu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:180px;padding:.35rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}',
@@ -502,9 +502,9 @@
     return { text: money(r.net), title: lines.join('\n'), neg: r.net < 0 };
   }
 
-  // ---- #12 optional columns: a Columns menu on the board controls; a column is hidden by its header label -----------
-  // Labels are read from the game's header row each pass, so the menu follows whatever columns the board shows (ICUX's
-  // Held and Net included). The choice is stored in settings.hiddenCols.
+  // ---- #12 optional columns: a Columns menu above every in-game table; a column is hidden by its header label -----------
+  // Labels are read from each table's header row on every pass, so the menu follows whatever the table shows (ICUX's Held
+  // and Net included). Choices are kept per table, keyed by its header labels, in settings.hiddenColumns.
   const closeColumnMenus = () => {
     for (const m of document.querySelectorAll('.icux-colmenu.on')) {
       m.classList.remove('on');
@@ -514,40 +514,46 @@
   document.addEventListener('click', closeColumnMenus);
   // Header text without sort arrows or other glyphs: letters, digits and plain punctuation only.
   const colName = (th) => th.textContent.replace(/[^\p{L}\p{N}&%()./+ -]+/gu, ' ').replace(/\s+/g, ' ').trim();
-  function applyColumns(controls, count, table, head) {
-    let pick = controls.querySelector(':scope > .icux-colpick');
-    if (!pick) {
-      pick = mk('span', 'icux-colpick', null, 'colpick');
-      const btn = mk('button', 'icux-colbtn', 'Columns', 'colbtn');
-      btn.type = 'button';
-      btn.setAttribute('aria-haspopup', 'true');
-      btn.setAttribute('aria-expanded', 'false');
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const menu = pick.querySelector(':scope > .icux-colmenu');
-        const on = !menu.classList.contains('on');
-        closeColumnMenus();
-        menu.classList.toggle('on', on);
-        btn.setAttribute('aria-expanded', String(on));
-      });
-      const menu = mk('div', 'icux-colmenu', null, 'colmenu');
-      menu.addEventListener('click', (e) => e.stopPropagation()); // ticking a column must not close the menu
-      pick.append(btn, menu);
-      controls.insertBefore(pick, count);
-    }
-    const menu = pick.querySelector(':scope > .icux-colmenu');
+  const colPicks = new WeakMap(); // table -> its Columns control, placed just above the table
+  function colPickFor(table) {
+    const old = colPicks.get(table);
+    if (old?.isConnected && old.nextElementSibling === table) return old;
+    const pick = mk('div', 'icux-colpick', null, 'colpick');
+    const btn = mk('button', 'icux-colbtn', 'Columns', 'colbtn');
+    btn.type = 'button';
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = pick.querySelector(':scope > .icux-colmenu');
+      const on = !menu.classList.contains('on');
+      closeColumnMenus();
+      menu.classList.toggle('on', on);
+      btn.setAttribute('aria-expanded', String(on));
+    });
+    const menu = mk('div', 'icux-colmenu', null, 'colmenu');
+    menu.addEventListener('click', (e) => e.stopPropagation()); // ticking a column must not close the menu
+    pick.append(btn, menu);
+    table.parentElement.insertBefore(pick, table);
+    colPicks.set(table, pick);
+    return pick;
+  }
+  function applyColumns(table, head) {
     const names = [...new Set([...head.children].map(colName).filter(Boolean))];
-    const sig = JSON.stringify(names);
-    if (menu.dataset.sig !== sig) {
-      menu.dataset.sig = sig;
+    if (names.length < 2) { colPicks.get(table)?.remove(); return null; } // one column has nothing to choose between
+    const key = JSON.stringify(names);
+    const pick = colPickFor(table);
+    const menu = pick.querySelector(':scope > .icux-colmenu');
+    if (menu.dataset.sig !== key) {
+      menu.dataset.sig = key;
       menu.replaceChildren(...names.map((name) => {
         const lab = mk('label', 'icux-colopt', null, 'colopt');
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.value = name;
         input.addEventListener('change', () => {
-          const rest = settings.hiddenCols.filter((n) => n !== name);
-          settings.hiddenCols = input.checked ? rest : [...rest, name];
+          const rest = (settings.hiddenColumns[key] ?? []).filter((n) => n !== name);
+          settings.hiddenColumns = { ...settings.hiddenColumns, [key]: input.checked ? rest : [...rest, name] };
           saveSettings();
           schedule();
         });
@@ -555,17 +561,31 @@
         return lab;
       }));
     }
+    const hidden = settings.hiddenColumns[key] ?? [];
     for (const input of menu.querySelectorAll('input')) {
-      const checked = !settings.hiddenCols.includes(input.value);
+      const checked = !hidden.includes(input.value);
       if (input.checked !== checked) input.checked = checked;
     }
-    const hidden = new Set(settings.hiddenCols);
-    const hideAt = [...head.children].map((th) => hidden.has(colName(th)));
-    for (const row of table.querySelectorAll(':scope > thead > tr, :scope > tbody > tr')) {
+    const hideAt = [...head.children].map((th) => hidden.includes(colName(th)));
+    for (const row of table.rows) {
       const cells = [...row.children];
       if (cells.length !== hideAt.length) continue; // colspan rows (empty or loading states) stay as they are
       cells.forEach((cell, i) => cell.toggleAttribute('data-icux-hide', hideAt[i]));
     }
+    return pick;
+  }
+  // Tables the game or ic-autopilot draws for its own UI (the auto-ship jobs table, tooltips, menus) get no Columns menu.
+  const ownTable = (table) => table.matches('.autoship-table') || !!table.closest('[data-icux], .idc-panel, .as-panel, .idc-chip, [role="tooltip"], [role="menu"]');
+  function applyTables() {
+    const claimed = new Set();
+    for (const table of document.querySelectorAll('table')) {
+      const head = table.tHead?.rows[0];
+      if (ownTable(table) || !head) { colPicks.get(table)?.remove(); continue; }
+      const pick = applyColumns(table, head);
+      if (pick) claimed.add(pick);
+    }
+    // When React swaps a table for a new element, the old pick stays behind: keep only the picks of tables on the page.
+    for (const pick of document.querySelectorAll('.icux-colpick')) if (!claimed.has(pick)) pick.remove();
   }
 
   function applyBoard(c) {
@@ -641,11 +661,10 @@
       setText(empty, settings.ownedOnly ? 'No bids for items you hold in ' + REGIONS[uiR] + (settings.hideExpired ? ' that last 5 minutes or more' : '') : 'Every contract is hidden by the ICUX filters');
     } else empty?.remove();
     bleed?.toggleAttribute('data-icux-hide', all);
-    if (table && head) applyColumns(controls, count, table, head);
   }
 
   // ---- observer -----------------------------------------------------------------------------------------------------
-  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyBoard];
+  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyBoard, applyTables];
   function pass() {
     watchChrome();
     ctx = walk();

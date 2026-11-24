@@ -19,7 +19,7 @@ Updates come through the same link.
 - **Cost preview:** hover Build for the next, +5 and +10 cost and the materials needed; hover Demolish for the refund.
 - **Market board:** an "only items I hold" filter, a Held column with "can fill", a Net column (revenue minus goods at base value, freight and fuel, the way the game's Sell dialog prices freight), a "hide expiring" filter and an exact m:ss countdown under 5 minutes.
 - **Free land** for the selected region in the top bar.
-- **Optional columns:** a Columns menu on the market board shows or hides any column, the game's own and ICUX's Held and Net, the way Odoo's optional columns work. The choice is saved across reloads.
+- **Optional columns:** every table in the game gets a Columns menu above it that shows or hides columns, the way Odoo's optional columns work. The market board's Held and Net columns are in the same menu. Choices are saved per table across reloads.
 - **Compact top bar:** on desktop windows about 1360px and wider the top bar stays on one row, so the balance no longer drops to a second line. Nothing is hidden; narrower windows wrap the chips as before.
 
 Filters are saved across reloads.
