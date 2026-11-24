@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.4.0
+// @version      0.4.1
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -140,7 +140,7 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
@@ -243,13 +243,16 @@
     '.icux-tip .icux-strong{color:var(--ink);font-weight:600;margin-bottom:2px}',
     '.icux-tip .icux-row{display:flex;justify-content:space-between;gap:16px}',
     '.icux-tip .icux-note{color:var(--muted);margin-top:3px}',
-    '.icux-colpick{position:relative;display:flex;justify-content:flex-end;width:100%;margin-bottom:4px}',
-    '.icux-colbtn{height:28px;padding:0 .6rem;font-size:.85rem;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap}',
-    '.icux-colbtn:hover{color:var(--ink)}',
-    '.icux-colmenu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:180px;padding:.35rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}',
+    '.icux-colpick{position:relative;display:flex;justify-content:flex-end;margin:0 0 2px}',
+    '.icux-colbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);line-height:1;cursor:pointer}',
+    '.icux-colbtn:hover:not(:disabled),.icux-colbtn[aria-expanded="true"]:not(:disabled){background:var(--surface-2);color:var(--ink)}',
+    '.icux-colbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}',
+    '.icux-colbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}',
+    '.icux-colmenu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:170px;padding:.3rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}',
     '.icux-colmenu.on{display:block}',
-    '.icux-colopt{display:flex;align-items:center;gap:.45rem;padding:.25rem .45rem;font-size:.85rem;color:var(--ink-2);white-space:nowrap;cursor:pointer;border-radius:6px}',
-    '.icux-colopt:hover{background:var(--surface-3)}',
+    '.icux-colopt{display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;font-size:13px;color:var(--ink-2);white-space:nowrap;cursor:pointer;border-radius:6px}',
+    '.icux-colopt:hover{background:var(--surface-3);color:var(--ink)}',
+    '.icux-colopt input{width:14px;height:14px;flex:none;margin:0;padding:0;border:0;background:none;accent-color:var(--accent)}',
     // #11 compact header, desktop only (the game's tablet and phone layouts stay as they are). Nothing is hidden. The bar
     // stays on one row where it fits, so the balance no longer drops to a second line; chips wrap inside the tools otherwise.
     '@media (min-width:901px){',
@@ -519,7 +522,10 @@
     const old = colPicks.get(table);
     if (old?.isConnected && old.nextElementSibling === table) return old;
     const pick = mk('div', 'icux-colpick', null, 'colpick');
-    const btn = mk('button', 'icux-colbtn', 'Columns', 'colbtn');
+    const btn = mk('button', 'icux-colbtn', null, 'colbtn');
+    btn.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="3" height="11" rx="1"/><rect x="6.5" y="2.5" width="3" height="11" rx="1"/><rect x="11" y="2.5" width="3" height="11" rx="1"/></svg>';
+    btn.title = 'Columns';
+    btn.setAttribute('aria-label', 'Columns');
     btn.type = 'button';
     btn.setAttribute('aria-haspopup', 'true');
     btn.setAttribute('aria-expanded', 'false');
