@@ -19,6 +19,7 @@ Updates come through the same link.
 - **Cost preview:** hover Build for the next, +5 and +10 cost and the materials needed; hover Demolish for the refund.
 - **Market board:** an "only items I hold" filter, a Held column with "can fill", a Net column (revenue minus goods at base value, freight and fuel, the way the game's Sell dialog prices freight), a "hide expiring" filter and an exact m:ss countdown under 5 minutes.
 - **Free land** for the selected region in the top bar.
+- **Compact top bar:** on desktop windows about 1360px and wider the top bar stays on one row, so the balance no longer drops to a second line. Nothing is hidden; narrower windows wrap the chips as before.
 
 Filters are saved across reloads.
 

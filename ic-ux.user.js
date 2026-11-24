@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.1.0
+// @version      0.2.0
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -140,7 +140,7 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
@@ -242,7 +242,28 @@
     '.icux-tip .icux-strong{color:var(--ink);font-weight:600;margin-bottom:2px}',
     '.icux-tip .icux-row{display:flex;justify-content:space-between;gap:16px}',
     '.icux-tip .icux-note{color:var(--muted);margin-top:3px}',
+    // #11 compact header, desktop only (the game's tablet and phone layouts stay as they are). Nothing is hidden. The bar
+    // stays on one row where it fits, so the balance no longer drops to a second line; chips wrap inside the tools otherwise.
+    '@media (min-width:901px){',
+    'header.topbar{flex-wrap:nowrap;gap:.5rem;padding:.4rem 1rem}',
+    'header.topbar>.topbar-tools{flex:1 1 0;gap:.35rem}',
+    'header.topbar>.topbar-tools>:is(.event-chip,.shipments-chip,.idc-chip),header.topbar>.topbar-tools>.tip-anchor>.power-status{padding:0 .45rem}',
+    '}',
   ].join('');
+
+  // ---- #11 compact header (CSS above) -------------------------------------------------------------------------------
+  // The game writes the bar's height to --chrome-h (the sticky offsets below it) on mount and on window resize only.
+  // The compact bar changes its height after that, so the variable follows the bar's own size.
+  let chromeEl = null, chromeRO = null;
+  const syncChrome = () => { if (chromeEl) document.documentElement.style.setProperty('--chrome-h', chromeEl.getBoundingClientRect().height + 'px'); };
+  function watchChrome() {
+    const el = document.querySelector('.chrome');
+    if (el === chromeEl) return;
+    chromeRO?.disconnect();
+    chromeEl = el;
+    chromeRO = el ? new ResizeObserver(syncChrome) : null;
+    chromeRO?.observe(el);
+  }
 
   // ---- #10 free land ------------------------------------------------------------------------------------------------
   function applyLand(c) {
@@ -551,6 +572,7 @@
   // ---- observer -----------------------------------------------------------------------------------------------------
   const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyBoard];
   function pass() {
+    watchChrome();
     ctx = walk();
     if (!ctx.st || !ctx.catalog) return;
     index(ctx.catalog);
@@ -577,6 +599,8 @@
       cancelAnimationFrame(raf);
       for (const el of document.querySelectorAll('[data-icux]')) el.remove();
       for (const el of document.querySelectorAll('[data-icux-hide]')) el.removeAttribute('data-icux-hide');
+      chromeRO?.disconnect();
+      if (chromeEl) document.documentElement.style.setProperty('--chrome-h', chromeEl.getBoundingClientRect().height + 'px');
       delete window.icux;
     },
   };
