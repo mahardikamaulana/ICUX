@@ -105,4 +105,27 @@ assert.equal(m.mmss(120), '1:00');
 assert.equal(m.mmss(599), '4:59');
 assert.equal(m.mmss(1), '0:00');
 
+// groupProfit: $/h of a group while it runs; items at base value, power and water at the grid price per hour (MW x 6,000 cents)
+const rc = { ticks: 20, inputs: [{ item: 2, amount: 1 }], outputs: [{ item: 1, amount: 2 }] };
+const val = (vals) => (id) => vals[id];
+const gp = (o) => m.groupProfit({ count: 1, recipe: rc, building: { draws: {} }, value: val({ 1: 100, 2: 30 }), ...o });
+// 360 runs/h: outputs 2 x 100 x 360 = 72,000; inputs 1 x 30 x 360 = 10,800; 5 MW for the building = 30,000 a hour
+assert.equal(gp({ building: { draws: { power: 5 } } }).perH, 72000 - 10800 - 30000);
+// a loss, flagged by the sign
+assert.ok(gp({ value: val({ 1: 10, 2: 30 }), building: { draws: { power: 5 } } }).perH < 0);
+// the module speed 100% halves the wave: 720 runs/h
+assert.equal(gp({ report: { speed: 100 } }).runsH, 720);
+// an input without a base value is not counted and is listed
+const nv = gp({ value: val({ 1: 100 }) });
+assert.equal(nv.inputs, 0);
+assert.deepEqual(nv.unvalued, [2]);
+// a diurnal generator credits its daily mean: 24 MW x 0.8125 x 6,000 cents
+assert.equal(gp({ recipe: { ticks: 20, inputs: [], outputs: [], generates: { power: 24 }, diurnal: true } }).perH, 117000);
+// the event price multiplies the power cost only: 5 MW x 2 x 6,000
+assert.equal(gp({ building: { draws: { power: 5 } }, powerMult: 2 }).power.cost, 60000);
+// draws_pct scales the building's and the recipe's draws: 4 MW + 2 MW at 50% = 3 MW = 18,000 a hour
+assert.equal(gp({ building: { draws: { power: 4 } }, recipe: { ...rc, draws: { power: 2 } }, report: { draws_pct: 50 } }).power.draw, 3);
+assert.equal(gp({ building: { draws: { power: 4 } }, recipe: { ...rc, draws: { power: 2 } }, report: { draws_pct: 50 } }).power.cost, 18000);
+assert.equal(m.groupProfit({ count: 0, recipe: rc, building: {}, value: val({}) }), null);
+
 console.log('icuxMath: all checks passed');

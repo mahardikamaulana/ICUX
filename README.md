@@ -22,6 +22,7 @@ Updates come through the same link.
 - **Free land** for the selected region in the top bar.
 - **Optional columns:** every table in the game gets a Columns menu above it that shows or hides columns, the way Odoo's optional columns work. The market board's Held and Net columns are in the same menu. Choices are saved per table across reloads.
 - **Compact top bar:** on desktop windows about 1360px and wider the top bar stays on one row, so the balance no longer drops to a second line. Nothing is hidden; narrower windows wrap the chips as before.
+- **Profit per group:** a $/h figure on each production group card, after inputs, power and water, at base value. A group that loses money is flagged in red. A toggle in the Production groups header hides or shows the figure.
 
 Filters are saved across reloads.
 

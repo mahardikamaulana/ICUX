@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.4.2
+// @version      0.5.0
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -135,19 +135,52 @@
       return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
     };
 
-    return { held, inRegion, ownedCount, hops, nextCosts, freeLand, maxAssign, allowance, fuelTrip, refinerCut, freeTrucks, courierCap, mdCost, freight, freightEnv, freightFor, net, mmss };
+    // Steady profit of one production group while it runs, in cents per hour. Items are valued at base value, as the game's card
+    // values a recipe: runs per wave = buildings x floorplan rate, and the wave is the recipe's ticks shortened by the modules' speed
+    // (report: the engine's moduleReport; its inputs_pct and outputs_pct scale what a run eats and makes). Power and water cost the
+    // grid price ($10 per MW and $4 per kL per 10-minute bill) for every building's draw plus each run's recipe draw, as the
+    // game counts load; power or water a recipe generates is credited at the same price (a day/night generator at its daily mean).
+    // value(item) -> cents, or not a number when the item has no base value: such items are left out and listed in unvalued.
+    const TICKS_H = 7200;
+    const UTIL_PER_H = { power: 6000, water: 2400 };
+    const DAY_MEAN = (21600 + 7200 * 0.25) / 28800; // full output for 21,600 of 28,800 ticks, 25% at night
+    const groupProfit = ({ count, recipe, building, rate = 1, report, value, powerMult = 1 }) => {
+      if (!(recipe?.ticks > 0) || !(count > 0)) return null;
+      const ticks = Math.max(1, Math.floor((recipe.ticks * 100) / (100 + (report?.speed ?? 0))));
+      const runs = count * rate, runsH = (runs * TICKS_H) / ticks;
+      const unvalued = new Set();
+      const worth = (list, pct) => list.reduce((a, x) => {
+        const v = value(x.item);
+        if (typeof v !== 'number') { unvalued.add(x.item); return a; }
+        return a + (x.amount * pct * v * runsH) / 100;
+      }, 0);
+      const drawPct = report?.draws_pct ?? 100;
+      const outputs = worth(recipe.outputs ?? [], report?.outputs_pct ?? 100);
+      const inputs = worth(recipe.inputs ?? [], report?.inputs_pct ?? 100);
+      const util = {};
+      for (const u of ['power', 'water']) {
+        const draw = ((building?.draws?.[u] ?? 0) * count + (recipe.draws?.[u] ?? 0) * runs) * (drawPct / 100); // draws_pct scales every draw
+        const made = (recipe.generates?.[u] ?? 0) * runs * (recipe.diurnal ? DAY_MEAN : 1);
+        const price = UTIL_PER_H[u] * (u === 'power' ? powerMult : 1);
+        util[u] = { draw, made, cost: draw * price, credit: made * price };
+      }
+      const perH = outputs - inputs - util.power.cost - util.water.cost + util.power.credit + util.water.credit;
+      return { perH: Math.round(perH), outputs, inputs, power: util.power, water: util.water, ticks, runsH, unvalued: [...unvalued] };
+    };
+
+    return { held, inRegion, ownedCount, hops, nextCosts, freeLand, maxAssign, allowance, fuelTrip, refinerCut, freeTrucks, courierCap, mdCost, freight, freightEnv, freightFor, net, mmss, groupProfit };
   })();
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.4.2';
+  const VERSION = '0.5.0';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
   const SETTINGS_KEY = 'icux.settings';
 
   const store = (() => { try { return window.localStorage ?? null; } catch { return null; } })();
-  const settings = { ownedOnly: false, hideExpired: false, hiddenColumns: {} };
+  const settings = { ownedOnly: false, hideExpired: false, hiddenColumns: {}, groupProfit: true };
   try { Object.assign(settings, JSON.parse(store?.getItem(SETTINGS_KEY) ?? '{}')); } catch {}
   if (!settings.hiddenColumns || typeof settings.hiddenColumns !== 'object' || Array.isArray(settings.hiddenColumns)) settings.hiddenColumns = {};
   const saveSettings = () => { try { store?.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} };
@@ -180,12 +213,12 @@
 
   // Walk the React fiber tree for the socket, the display state and the catalog (trimmed from ic-autopilot's core walk).
   function walk() {
-    const out = { ws: null, st: null, catalog: null };
+    const out = { ws: null, st: null, catalog: null, engine: null };
     const root = document.getElementById('root');
     const key = root && Object.keys(root).find((k) => k.startsWith('__reactContainer'));
     if (!key) return out;
     const seen = new Set(), stack = [root[key]];
-    while (stack.length && !(out.ws && out.st && out.catalog)) {
+    while (stack.length && !(out.ws && out.st && out.catalog && out.engine)) {
       const f = stack.pop();
       if (!f || seen.has(f)) continue;
       seen.add(f);
@@ -197,7 +230,7 @@
         h = h.next; n++;
       }
       const p = f.memoizedProps;
-      if (p && p.catalog?.techs && !out.catalog) out.catalog = p.catalog;
+      if (p && p.engine && typeof p.engine.moduleReport === 'function' && !out.engine) out.engine = p.engine; // the group card's module report
       if (f.child) stack.push(f.child);
       if (f.sibling) stack.push(f.sibling);
     }
@@ -243,6 +276,10 @@
     '.icux-tip .icux-strong{color:var(--ink);font-weight:600;margin-bottom:2px}',
     '.icux-tip .icux-row{display:flex;justify-content:space-between;gap:16px}',
     '.icux-tip .icux-note{color:var(--muted);margin-top:3px}',
+    '.icux-gp{margin-right:.5rem;font-size:12.5px;color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums;align-self:center}',
+    '.icux-gp.icux-neg{color:var(--status-crit);font-weight:600}',
+    '.icux-gp.muted{color:var(--muted)}',
+    '.icux-colbtn[aria-pressed="true"]{color:var(--accent)}',
     '.icux-colpick{position:relative;display:flex;justify-content:flex-end;margin:0 0 2px}',
     '.icux-colbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);line-height:1;cursor:pointer}',
     '.icux-colbtn:hover:not(:disabled),.icux-colbtn[aria-expanded="true"]:not(:disabled){background:var(--surface-2);color:var(--ink)}',
@@ -698,8 +735,89 @@
     bleed?.toggleAttribute('data-icux-hide', all);
   }
 
+  // ---- #13 profit per group: $/h on every group card, after inputs, power and water --------------------------------------
+  // The card's own props give the group, catalog and display state. The engine (module report, world event) comes from walk():
+  // the Priority list's card is not passed it, so it is read from the fiber tree like the socket.
+  const cardProps = (el) => fiberUp(el, (p) => typeof p.groupId === 'number' && p.group && p.catalog && p.display);
+  const PROFIT_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M10 6c-.4-.6-1.1-.9-2-.9-1.1 0-1.9.6-1.9 1.4 0 1.9 3.9 1 3.9 3 0 .8-.8 1.4-2 1.4-.9 0-1.6-.3-2-.9M8 3.6v1.5M8 10.9v1.5"/></svg>';
+  const reports = new WeakMap(); // engine -> Map(building + modules -> module report)
+  function moduleReport(engine, g) {
+    if (typeof engine?.moduleReport !== 'function') return null;
+    let cache = reports.get(engine);
+    if (!cache) { cache = new Map(); reports.set(engine, cache); }
+    const mods = JSON.stringify(g.modules ?? {}), key = g.building + '|' + mods;
+    if (!cache.has(key)) { try { cache.set(key, JSON.parse(engine.moduleReport(g.building, mods))); } catch { cache.set(key, null); } }
+    return cache.get(key);
+  }
+  // The NPC power price multiplier of a world event (the client's event chip reads engine.worldEventAt the same way); 1 when none.
+  function powerMult(engine, tick) {
+    try {
+      const ev = tick > 0 && typeof engine?.worldEventAt === 'function' ? JSON.parse(engine.worldEventAt(tick)) : null;
+      return ev?.outage && Number.isFinite(ev.percent) ? Math.max(0, (100 + ev.percent) / 100) : 1;
+    } catch { return 1; }
+  }
+  function profitOf(g, { catalog, display, engine, tick }) {
+    const recipe = g.recipe == null ? null : display.recipes?.[String(g.recipe)] ?? (catalog.recipes ?? []).find((r) => r.id === g.recipe) ?? null;
+    if (!recipe) return null;
+    const { items, buildings } = index(catalog);
+    const mult = powerMult(engine, tick);
+    const r = icuxMath.groupProfit({
+      count: g.count, recipe, building: buildings.get(g.building), rate: display.layouts?.[String(recipe.id)]?.fx?.rate ?? 1,
+      report: moduleReport(engine, g), value: (id) => items.get(id)?.base_value, powerMult: mult,
+    });
+    return r && { ...r, paused: !!g.paused, powerMult: mult, recipe };
+  }
+  const perHour = (c) => (c < 0 ? '−$' : '$') + Math.round(Math.abs(c) / 100).toLocaleString() + '/h';
+  function profitTitle(r) {
+    const name = (id) => idx.items.get(id)?.name ?? '#' + id;
+    const lines = [(r.paused ? 'Paused: earns nothing now. While running, ' : 'While running, ') + 'per hour, items at base value',
+      'Outputs +' + money(r.outputs), 'Inputs −' + money(r.inputs)];
+    for (const [u, unit] of [['power', 'MW'], ['water', 'kL']]) {
+      const x = r[u];
+      if (x.draw > 0) lines.push(u[0].toUpperCase() + u.slice(1) + ' ' + x.draw.toLocaleString() + ' ' + unit + ' −' + money(x.cost));
+      if (x.made > 0) lines.push(u[0].toUpperCase() + u.slice(1) + ' made ' + (Math.round(x.made * 10) / 10).toLocaleString() + ' ' + unit + ' +' + money(x.credit));
+    }
+    lines.push('Net ' + perHour(r.perH), (Math.round(r.runsH * 10) / 10).toLocaleString() + ' runs/h, wave ' + (r.ticks / 2).toLocaleString() + ' s');
+    if (r.powerMult !== 1) lines.push('Power at the event price x' + r.powerMult);
+    if (r.unvalued.length) lines.push('Not valued (no base value): ' + r.unvalued.map(name).join(', '));
+    return lines.join('\n');
+  }
+  function applyGroupProfit(c) {
+    const head = document.querySelector('.drag-wrap[data-group-id]')?.closest('section.panel')?.querySelector(':scope > .panel-head');
+    let btn = document.querySelector('.icux-gpbtn');
+    if (head && btn?.parentElement !== head) {
+      btn?.remove();
+      btn = mk('button', 'icux-colbtn icux-gpbtn', null, 'gpbtn');
+      btn.innerHTML = PROFIT_ICON;
+      btn.type = 'button';
+      btn.title = 'Profit per hour';
+      btn.setAttribute('aria-label', 'Profit per hour');
+      btn.addEventListener('click', () => { settings.groupProfit = !settings.groupProfit; saveSettings(); schedule(); });
+      head.insertBefore(btn, head.querySelector(':scope > .view-toggle'));
+    } else if (!head) btn?.remove();
+    if (btn?.isConnected) setAttr(btn, 'aria-pressed', String(!!settings.groupProfit));
+
+    for (const actions of document.querySelectorAll('.worker-collapsed > .head-actions, .worker-row-head > .head-actions, .worker-head > .head-actions')) {
+      let cell = actions.querySelector(':scope > .icux-gp');
+      const p = settings.groupProfit ? cardProps(actions) : null;
+      const r = p && profitOf(p.group, { catalog: p.catalog, display: p.display, engine: c.engine, tick: nowTick() });
+      if (!r) { cell?.remove(); continue; }
+      if (!cell) { cell = mk('span', 'icux-gp', '', 'gp'); actions.prepend(cell); }
+      const loss = r.perH < 0 && r.unvalued.length === 0; // an unvalued output could be what pays: no flag then
+      setText(cell, (loss ? '⚠ ' : r.unvalued.length ? '≈ ' : '') + perHour(r.perH));
+      setAttr(cell, 'title', profitTitle(r));
+      cell.classList.toggle('icux-neg', loss);
+      cell.classList.toggle('muted', r.paused);
+    }
+  }
+  // The same figure for other scripts (Core plan's rebalancing can read it): null without a recipe or buildings.
+  function groupProfitById(id) {
+    const c = walk(), g = c.st?.groups?.[id];
+    return g && c.catalog ? profitOf(g, { catalog: c.catalog, display: c.st, engine: c.engine, tick: nowTick() }) : null;
+  }
+
   // ---- observer -----------------------------------------------------------------------------------------------------
-  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyPostOrder, applyBoard, applyTables];
+  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyPostOrder, applyBoard, applyTables, applyGroupProfit];
   function pass() {
     watchChrome();
     ctx = walk();
@@ -721,7 +839,7 @@
   observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-pressed'] });
 
   window.icux = {
-    version: VERSION, math: icuxMath, settings, refresh: schedule,
+    version: VERSION, math: icuxMath, settings, refresh: schedule, groupProfit: groupProfitById,
     _unload() {
       observer.disconnect();
       stopTimer();
