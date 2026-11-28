@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.5.1
+// @version      0.6.0
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -173,7 +173,7 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.5.1';
+  const VERSION = '0.6.0';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
@@ -281,6 +281,11 @@
     '.icux-gp.icux-neg{color:var(--status-crit);font-weight:600}',
     '.icux-gp.muted{color:var(--muted)}',
     '.icux-colbtn[aria-pressed="true"]{color:var(--accent)}',
+    '.icux-techsearch{margin-left:auto;width:200px;max-width:45vw}',
+    '.icux-techcount{margin-left:.5rem;font-size:.85rem;white-space:nowrap;font-variant-numeric:tabular-nums}',
+    '.tech-node[data-icux-dim]{opacity:.3}',
+    '.tech-node[data-icux-match]{outline:2px solid var(--accent);outline-offset:2px}',
+    '.icux-ship{margin-right:4px}',
     '.icux-colpick{position:relative;display:flex;justify-content:flex-end;margin:0 0 2px}',
     '.icux-colbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);line-height:1;cursor:pointer}',
     '.icux-colbtn:hover:not(:disabled),.icux-colbtn[aria-expanded="true"]:not(:disabled){background:var(--surface-2);color:var(--ink)}',
@@ -647,8 +652,8 @@
     }
     return pick;
   }
-  // Tables the game or ic-autopilot draws for its own UI (the auto-ship jobs table, tooltips, menus) get no Columns menu.
-  const ownTable = (table) => table.matches('.autoship-table') || !!table.closest('[data-icux], .idc-panel, .as-panel, .idc-chip, [role="tooltip"], [role="menu"]');
+  // ICUX's own tables, ic-autopilot's control panel, tooltips and menus get no Columns menu (its Auto ship jobs table does).
+  const ownTable = (table) => !!table.closest('[data-icux], .idc-panel, .idc-chip, [role="tooltip"], [role="menu"]');
   function applyTables() {
     const claimed = new Set();
     for (const table of document.querySelectorAll('table')) {
@@ -707,7 +712,7 @@
       tr.toggleAttribute('data-icux-hide', hide);
 
       const held = cellOf(tr, 'held');
-      setText(valueSpan(held), bid ? have.toLocaleString() + (fill > 0 && fill < deal.amount ? ' · fill ' + fill.toLocaleString() : '') : '—');
+      setText(valueSpan(held), bid ? have.toLocaleString() : '—');
       held.classList.toggle('muted', !bid || have === 0);
 
       const nc = netCell(deal, items.get(deal.item), fill, env, uiR, fuelValue);
@@ -817,8 +822,94 @@
     return g && c.catalog ? profitOf(g, { catalog: c.catalog, display: c.st, engine: c.engine, tick: nowTick() }) : null;
   }
 
+  // ---- #14 research search: a search box on the Construction research panel ----------------------------------------------
+  // Matches are lit and the rest dimmed; typing centres the first match, Enter / Shift+Enter the next / previous one. Centring
+  // uses the game's own setTechFocus (the tree re-centres when the focused building changes).
+  let techQuery = '', techPick = -1;
+  const fiberWith = (el, test) => { for (let f = fiberOf(el); f; f = f.return) if (f.memoizedProps && test(f.memoizedProps)) return f; return null; };
+  const nodeBuilding = (node) => fiberUp(node, (p) => typeof p.buildingId === 'number' && p.pos !== undefined)?.buildingId;
+  const techMatches = (wrap) => {
+    const q = techQuery.trim().toLowerCase();
+    return q ? [...wrap.querySelectorAll('.tech-node')].filter((n) => (n.querySelector('.tech-node-title')?.textContent ?? '').toLowerCase().includes(q)) : [];
+  };
+  function focusTech(wrap, dir) {
+    const hits = techMatches(wrap).map(nodeBuilding).filter((id) => typeof id === 'number');
+    if (!hits.length) return;
+    techPick = ((techPick + dir) % hits.length + hits.length) % hits.length;
+    const app = fiberUp(wrap, (p) => typeof p.setTechFocus === 'function');
+    if (!app) return;
+    const id = hits[techPick];
+    if (app.techFocus === id) { app.setTechFocus(null); requestAnimationFrame(() => app.setTechFocus(id)); } // same id: the tree only moves on a change
+    else app.setTechFocus(id);
+  }
+  function applyTechSearch() {
+    const wrap = document.querySelector('.tech-wrap');
+    const head = wrap?.closest('.panel')?.querySelector(':scope > .panel-head');
+    if (!head) return;
+    let box = head.querySelector(':scope > .icux-techsearch');
+    if (!box) {
+      box = mk('input', 'icux-techsearch', null, 'techsearch');
+      box.type = 'search';
+      box.placeholder = 'Search buildings';
+      box.setAttribute('aria-label', 'Search buildings in the tree');
+      box.value = techQuery;
+      box.addEventListener('input', () => { techQuery = box.value; techPick = -1; schedule(); const w = document.querySelector('.tech-wrap'); if (w) focusTech(w, 1); });
+      box.addEventListener('keydown', (e) => {
+        e.stopPropagation(); // the game's hotkeys must not see typing
+        const w = document.querySelector('.tech-wrap');
+        if (e.key === 'Enter' && w) { e.preventDefault(); focusTech(w, e.shiftKey ? -1 : 1); }
+        if (e.key === 'Escape') { box.value = ''; techQuery = ''; techPick = -1; schedule(); }
+      });
+      head.append(box, mk('span', 'muted icux-techcount', '', 'techcount'));
+    }
+    const hits = new Set(techMatches(wrap));
+    const on = techQuery.trim() !== '';
+    for (const node of wrap.querySelectorAll('.tech-node')) { // attributes, not classes: React rewrites the node's className
+      node.toggleAttribute('data-icux-match', on && hits.has(node));
+      node.toggleAttribute('data-icux-dim', on && !hits.has(node));
+    }
+    setText(head.querySelector(':scope > .icux-techcount'), on ? hits.size + (hits.size === 1 ? ' match' : ' matches') : '');
+  }
+
+  // ---- #15 Ship: a Ship button on each inventory row opens the game's "Ship to Exchange" dialog for that item ---------------
+  // It calls the row's own Sell handler, then moves the Sell dialog that opens to its "Ship to Exchange" step (the dialog's
+  // first state, null until a step is picked). Nothing is sent: the game's dialog still asks for the amount and the price.
+  let pendingShip = null; // { item, at }
+  const rowProps = (tr) => { const p = tr && fiberOf(tr)?.return?.memoizedProps; return p && typeof p.onSell === 'function' && typeof p.item?.id === 'number' ? p : null; }; // the <tr> is the row component's root
+  function applyShip() {
+    for (const tr of document.querySelectorAll('tr:has(> td > button.item-link)')) {
+      const row = rowProps(tr);
+      if (!row) continue;
+      const sell = tr.lastElementChild?.querySelector('button:not([data-icux])');
+      if (!sell) continue;
+      let b = sell.parentElement.querySelector(':scope > .icux-ship');
+      if (!b) {
+        b = mk('button', 'mini icux-ship', 'Ship', 'ship');
+        b.type = 'button';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const p = rowProps(b.closest('tr'));
+          if (!p || b.disabled) return;
+          pendingShip = { item: p.item.id, at: Date.now() };
+          p.onSell();
+          schedule();
+        });
+        sell.before(b);
+      }
+      b.disabled = sell.disabled;
+      setAttr(b, 'title', 'Ship ' + (row.item.name ?? 'this item') + ' to the Exchange and list it at your price');
+    }
+    if (!pendingShip) return;
+    if (Date.now() - pendingShip.at > 1500) { pendingShip = null; return; } // never turn a later Sell click into Ship
+    for (const m of document.querySelectorAll('.modal-backdrop')) {
+      const f = fiberWith(m, (p) => p.item === pendingShip.item && Array.isArray(p.market) && p.starred !== undefined && typeof p.onClose === 'function' && p.deal === undefined);
+      const hook = f?.memoizedState;
+      if (hook?.queue?.dispatch && hook.memoizedState === null) { hook.queue.dispatch('list'); pendingShip = null; return; }
+    }
+  }
+
   // ---- observer -----------------------------------------------------------------------------------------------------
-  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyPostOrder, applyBoard, applyTables, applyGroupProfit];
+  const FEATURES = [applyLand, applyMax, applyBuildingRows, applyPresets, applyPostOrder, applyBoard, applyTables, applyGroupProfit, applyTechSearch, applyShip];
   function pass() {
     watchChrome();
     ctx = walk();
