@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ICUX
 // @namespace    https://github.com/mahardikamaulana
-// @version      0.5.0
+// @version      0.5.1
 // @description  Quality-of-life additions for idlecorp.net
 // @match        https://idlecorp.net/*
 // @grant        none
@@ -173,7 +173,7 @@
 // icuxMath:end
 
   // ---- shared plumbing ----------------------------------------------------------------------------------------------
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.1';
   const REGIONS = ['Heartland', 'Industrial Basin', 'Coastal Cities', 'Frontier'];
   const FUEL_ITEM = 60;
   const EXPIRING_TICKS = 600; // the game's own expires-soon threshold
@@ -230,6 +230,7 @@
         h = h.next; n++;
       }
       const p = f.memoizedProps;
+      if (p && p.catalog?.techs && !out.catalog) out.catalog = p.catalog; // pass() needs it: without it no feature runs
       if (p && p.engine && typeof p.engine.moduleReport === 'function' && !out.engine) out.engine = p.engine; // the group card's module report
       if (f.child) stack.push(f.child);
       if (f.sibling) stack.push(f.sibling);
